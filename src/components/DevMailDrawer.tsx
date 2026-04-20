@@ -7,7 +7,8 @@ import toast from 'react-hot-toast'
 export default function DevMailDrawer() {
   const { emails, isOpen, setOpen, removeEmail, clearAll } = useMailStore()
 
-  if (process.env.NODE_ENV === 'production') return null
+  // Hide in production
+  if (import.meta.env.PROD) return null
 
   const copyCode = (html: string) => {
     const match = html.match(/class="otp-code">(\d+)<\/div>/)

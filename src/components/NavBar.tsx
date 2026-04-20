@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Menu, X, Trophy, LogOut, LayoutDashboard, Target, History, User, Settings, ChevronDown } from 'lucide-react'
 import { useAuthStore } from '../store/useAuthStore'
+import toast from 'react-hot-toast'
 
 export default function NavBar() {
   const [scrolled, setScrolled] = useState(false)
