@@ -60,7 +60,7 @@ export default function Login() {
                 navigate('/admin')
             } else {
                 const mockUser: any = {
-                    id: 'mock_user_456',
+                    id: '00000000-0000-0000-0000-000000000456',
                     full_name: 'Arjun (VIP Pro)',
                     email: 'arjun@test.in',
                     role: 'user',
@@ -116,7 +116,7 @@ export default function Login() {
           return
         } else if (cleanEmail === 'arjun@test.in' && cleanPass === 'Test@123456') {
           const mockUser: any = {
-            id: 'mock_user_456',
+            id: '00000000-0000-0000-0000-000000000456',
             full_name: 'Arjun (VIP Pro)',
             email: 'arjun@test.in',
             role: 'user',
