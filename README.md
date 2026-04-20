@@ -23,9 +23,9 @@ Golff is a full-stack platform where golfers subscribe monthly/yearly, log their
 ## 🔗 Live Deployment & Access
 
 ### 🌐 Live URLs
-- **Website:** `https://golf-system.vercel.app` *(Replace with your Vercel URL)*
-- **User Dashboard:** `https://golf-system.vercel.app/dashboard`
-- **Admin Panel:** `https://golf-system.vercel.app/admin`
+- **Website:** https://golf-system-omega.vercel.app
+- **User Dashboard:** https://golf-system-omega.vercel.app/dashboard
+- **Admin Panel:** https://golf-system-omega.vercel.app/admin
 
 ### 💻 GitHub Repository
 - **Source Code:** https://github.com/Vedant294/GOLF-SYSTEM
