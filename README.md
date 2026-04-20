@@ -15,9 +15,41 @@
 Golff is a full-stack platform where golfers subscribe monthly/yearly, log their Stableford scores (1-45), and those scores become their lottery numbers in a monthly prize draw. A portion of every subscription automatically funds a charity of the user's choice.
 
 **Built for:** Digital Heroes Full-Stack Development Trainee Selection Process  
-**Submitted by:** Development Team  
 **Date:** April 2026  
 **Status:** ✅ Production Ready
+
+---
+
+## 🔗 Live Deployment & Access
+
+### 🌐 Live URLs
+- **Website:** `https://golf-system.vercel.app` *(Replace with your Vercel URL)*
+- **User Dashboard:** `https://golf-system.vercel.app/dashboard`
+- **Admin Panel:** `https://golf-system.vercel.app/admin`
+
+### 💻 GitHub Repository
+- **Source Code:** https://github.com/Vedant294/GOLF-SYSTEM
+
+### 🔐 Test Credentials
+
+**User Account:**
+```
+Email: arjun@test.in
+Password: Test@123
+```
+
+**Admin Panel:**
+```
+Email: admin@golff.in
+Password: Admin@123
+```
+
+**Test Payment Card:**
+```
+Card: 4242 4242 4242 4242
+Expiry: 12/28
+CVC: 123
+```
 
 ---
 
