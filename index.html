@@ -16,6 +16,23 @@
   </head>
   <body>
     <div id="root"></div>
+    <div id="loading-screen" style="position: fixed; inset: 0; background: #0A0A0F; display: flex; align-items: center; justify-content: center; z-index: 9999;">
+      <div style="text-align: center;">
+        <div style="width: 60px; height: 60px; border: 4px solid #1A1A2E; border-top: 4px solid #6EE7B7; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 20px;"></div>
+        <p style="color: #6EE7B7; font-family: system-ui; font-size: 18px; font-weight: 600;">Loading Golff...</p>
+      </div>
+    </div>
+    <style>
+      @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+    <script>
+      window.addEventListener('load', () => {
+        setTimeout(() => {
+          const loader = document.getElementById('loading-screen');
+          if (loader) loader.style.display = 'none';
+        }, 500);
+      });
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
