@@ -68,10 +68,9 @@ export default function Dashboard() {
       })
       .catch(() => setLoadingDraw(false))
 
-    // Fetch Charity
     if (user.charity_id) {
-      supabase.from('charities').select('id, name, image_url, description').eq('id', user.charity_id).single()
-        .then(res => { setCharity(res.data); setLoadingCharity(false); })
+      supabase.from('charities').select('*').eq('id', user.charity_id).single()
+        .then(res => { setCharity(res.data as Charity); setLoadingCharity(false); })
         .catch(() => setLoadingCharity(false))
     } else {
       setLoadingCharity(false)
@@ -79,7 +78,7 @@ export default function Dashboard() {
 
     // Fetch Winnings
     supabase.from('winners').select('*, draws(month, year)').eq('user_id', user.id).order('created_at', { ascending: false })
-      .then(res => setWinnings(res.data || []))
+      .then(res => setWinnings((res.data as any) || []))
       .catch(() => {})
 
   }, [user?.id])

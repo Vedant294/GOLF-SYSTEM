@@ -20,7 +20,7 @@ export const useAuthStore = create<{
   initialized: boolean
   justPaid: boolean
   signOut: () => void
-  refreshUser: (silent?: boolean) => Promise<void>
+  refreshUser: (silent?: boolean) => Promise<Profile | null>
   setSubscriptionActive: (plan?: string) => void
 }>((set, get) => ({
   user: null,
@@ -29,7 +29,6 @@ export const useAuthStore = create<{
   justPaid: localStorage.getItem('just_paid_expiry') ? Number(localStorage.getItem('just_paid_expiry')) > Date.now() : false,
 
   signOut: () => {
-    // 🛡️ SMART SIGN OUT: Clear auth tokens but keep the 'Just Paid' memory
     Object.keys(localStorage).forEach(key => {
       if (key.startsWith('sb-') && key.endsWith('-auth-token')) {
         localStorage.removeItem(key)
@@ -45,14 +44,12 @@ export const useAuthStore = create<{
       const token = getStoredToken()
       if (!token) { set({ user: null, initialized: true, loading: false }); return }
 
-      // ⚡ FAST AUTH FETCH
       const userRes = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
         headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${token}` },
       })
       if (!userRes.ok) { set({ user: null, initialized: true, loading: false }); return }
       const authUser = await userRes.json()
 
-      // 🛡️ SYNC GUARD & REAL-TIME
       const { supabase } = await import('../lib/supabase')
       const { data: profileData } = await supabase
         .from('profiles')
@@ -62,7 +59,6 @@ export const useAuthStore = create<{
       
       let profile = profileData as Profile | null
 
-      // 🩹 SELF-HEALING: If DB says inactive, check the official payments table
       if (profile && profile.subscription_status === 'inactive') {
         const { data: payments } = await supabase
           .from('subscription_payments')
@@ -74,8 +70,6 @@ export const useAuthStore = create<{
         if (payments) {
           profile.subscription_status = 'active'
           profile.subscription_plan = profile.subscription_plan || 'monthly'
-          
-          // Force update the DB
           await supabase.from('profiles').update({ subscription_status: 'active' }).eq('id', authUser.id)
         }
       }
@@ -87,21 +81,21 @@ export const useAuthStore = create<{
 
       set({ user: profile || null, initialized: true, loading: false })
       return profile
-    } catch (error) { set({ user: null, initialized: true, loading: false }) }
+    } catch (error) { 
+      set({ user: null, initialized: true, loading: false }) 
+      return null
+    }
   },
 
-  // 🚀 REAL-TIME ENGINE: Subscribe to profile changes
   subscribeToProfile: () => {
     const user = get().user
     if (!user) return
 
-    const { supabase } = import('../lib/supabase') // Dynamic import to avoid cycles
-    supabase.then(({ supabase }) => {
+    import('../lib/supabase').then(({ supabase }) => {
       supabase
         .channel(`profile-${user.id}`)
-        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${user.id}` }, 
-          (payload) => {
-            console.log('⚡ Real-time Profile Update:', payload.new)
+        .on('postgres_changes' as any, { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${user.id}` }, 
+          (payload: any) => {
             set({ user: payload.new as Profile })
           }
         )
@@ -109,8 +103,7 @@ export const useAuthStore = create<{
     })
   },
 
-  setSubscriptionActive: (plan = 'monthly') => {
-    // Set expiry for 2 minutes from now
+  setSubscriptionActive: (plan: 'monthly' | 'yearly' = 'monthly') => {
     const expiry = Date.now() + 120000 
     localStorage.setItem('just_paid_expiry', expiry.toString())
     

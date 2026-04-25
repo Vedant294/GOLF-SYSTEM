@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { Upload, Trophy, CheckCircle, Clock, AlertCircle, XCircle, Link as LinkIcon } from 'lucide-react'
+import { Upload, Trophy, CheckCircle, Clock, AlertCircle, XCircle, Link as LinkIcon, Zap } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { format, parseISO } from 'date-fns'

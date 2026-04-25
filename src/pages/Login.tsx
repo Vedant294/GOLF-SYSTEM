@@ -83,9 +83,9 @@ export default function Login() {
       toast.success('Welcome back!')
 
       // 4. SMART REDIRECT: Redirect based on the fixed profile status
-      if (finalProfile?.role === 'admin') {
+      if (finalProfile && (finalProfile as any).role === 'admin') {
         navigate('/admin', { replace: true })
-      } else if (finalProfile?.subscription_status === 'active') {
+      } else if (finalProfile && (finalProfile as any).subscription_status === 'active') {
         navigate('/dashboard', { replace: true })
       } else {
         navigate('/signup?step=1', { replace: true })
