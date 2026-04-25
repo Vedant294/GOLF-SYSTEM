@@ -42,7 +42,7 @@ export default function PaymentSuccess() {
         })
 
         // 3. Update the local store so the Dashboard sees it instantly
-        setSubscriptionActive(plan)
+        setSubscriptionActive(plan as 'monthly' | 'yearly')
 
         toast.success('Subscription Activated!')
         setLoading(false)

@@ -30,14 +30,15 @@ export default function Dashboard() {
     // 🛡️ TRUTH CHECK: If we see inactive, double check the receipts table
     if (user?.subscription_status === 'inactive') {
       supabase.from('subscription_payments')
-        .select('id')
+        .select('id, plan')
         .eq('user_id', user.id)
         .eq('status', 'paid')
         .maybeSingle()
         .then(res => {
           if (res.data) {
             console.log('🛡️ Dashboard found receipt. Activating session...')
-            useAuthStore.getState().setSubscriptionActive(user.subscription_plan || 'monthly')
+            const plan = res.data.plan || 'monthly'
+            useAuthStore.getState().setSubscriptionActive(plan as 'monthly' | 'yearly')
           }
         })
     }
@@ -51,36 +52,40 @@ export default function Dashboard() {
   useEffect(() => {
     if (!user?.id) return
 
-    // Fetch Scores
-    supabase.from('scores').select('id, score, created_at').eq('user_id', user.id).order('created_at', { ascending: false }).limit(5)
-      .then(res => { setScores(res.data || []); setLoadingScores(false); })
-      .catch(() => setLoadingScores(false))
+    const fetchData = async () => {
+      try {
+        // Fetch Scores
+        const { data: scoreData } = await supabase.from('scores').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(5)
+        setScores((scoreData as any) || [])
+        setLoadingScores(false)
 
-    // Fetch Latest Draw & Entry
-    supabase.from('draws').select('*').order('created_at', { ascending: false }).limit(1).single()
-      .then(async res => {
-        if (res.data) {
-          setLatestDraw(res.data as Draw)
-          const { data: entryData } = await supabase.from('draw_entries').select('*').eq('draw_id', res.data.id).eq('user_id', user.id).maybeSingle()
+        // Fetch Latest Draw & Entry
+        const { data: drawData } = await supabase.from('draws').select('*').order('created_at', { ascending: false }).limit(1).single()
+        if (drawData) {
+          setLatestDraw(drawData as Draw)
+          const { data: entryData } = await supabase.from('draw_entries').select('*').eq('draw_id', drawData.id).eq('user_id', user.id).maybeSingle()
           setMyEntry((entryData as any) || null)
         }
         setLoadingDraw(false)
-      })
-      .catch(() => setLoadingDraw(false))
 
-    if (user.charity_id) {
-      supabase.from('charities').select('*').eq('id', user.charity_id).single()
-        .then(res => { setCharity(res.data as Charity); setLoadingCharity(false); })
-        .catch(() => setLoadingCharity(false))
-    } else {
-      setLoadingCharity(false)
+        // Fetch Charity
+        if (user.charity_id) {
+          const { data: charData } = await supabase.from('charities').select('*').eq('id', user.charity_id).single()
+          setCharity(charData as Charity)
+        }
+        setLoadingCharity(false)
+
+        // Fetch Winnings
+        const { data: winData } = await supabase.from('winners').select('*, draws(month, year)').eq('user_id', user.id).order('created_at', { ascending: false })
+        setWinnings((winData as any) || [])
+      } catch (err) {
+        setLoadingScores(false)
+        setLoadingDraw(false)
+        setLoadingCharity(false)
+      }
     }
 
-    // Fetch Winnings
-    supabase.from('winners').select('*, draws(month, year)').eq('user_id', user.id).order('created_at', { ascending: false })
-      .then(res => setWinnings((res.data as any) || []))
-      .catch(() => {})
-
+    fetchData()
   }, [user?.id])
 
   const loading = useAuthStore((s) => s.loading)

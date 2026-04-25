@@ -21,6 +21,7 @@ export const useAuthStore = create<{
   justPaid: boolean
   signOut: () => void
   refreshUser: (silent?: boolean) => Promise<Profile | null>
+  subscribeToProfile: () => void
   setSubscriptionActive: (plan?: 'monthly' | 'yearly') => void
 }>((set, get) => ({
   user: null,
