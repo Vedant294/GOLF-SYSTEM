@@ -49,10 +49,30 @@ export default function AdminCharities() {
   }
 
   const deleteCharity = async (id: string) => {
-    if (!confirm('Delete this charity?')) return
-    await supabase.from('charities').delete().eq('id', id)
-    toast.success('Charity deleted')
-    fetchCharities()
+    if (!confirm('Warning: Deleting this charity will also remove its donation history. Proceed?')) return
+    
+    // 1. Optimistic UI update (remove from screen instantly)
+    const originalCharities = [...charities]
+    setCharities(charities.filter(c => c.id !== id))
+    
+    try {
+      // 2. Detach users supporting this charity (Fixes the FK violation)
+      await supabase.from('profiles').update({ favorite_charity_id: null }).eq('favorite_charity_id', id)
+      
+      // 3. Clear donations history
+      await supabase.from('donations').delete().eq('charity_id', id)
+      
+      // 4. Final Delete the charity
+      const { error } = await supabase.from('charities').delete().eq('id', id)
+      if (error) throw error
+
+      toast.success('Charity and all dependencies removed')
+    } catch (err: any) {
+      console.error('Delete failed:', err)
+      toast.error(`Delete failed: ${err.message}`)
+      // Revert UI if it failed
+      setCharities(originalCharities)
+    }
   }
 
   const toggleFeatured = async (c: Charity) => {

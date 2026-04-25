@@ -11,6 +11,7 @@ import Signup from './pages/Signup'
 import HowItWorks from './pages/HowItWorks'
 import Charities from './pages/Charities'
 import CharityProfile from './pages/CharityProfile'
+import PaymentSuccess from './pages/PaymentSuccess'
 
 // User Pages
 import Dashboard from './pages/Dashboard'
@@ -31,6 +32,14 @@ import DevMailDrawer from './components/DevMailDrawer'
 function App() {
   const { loading, initialized } = useAuth()
 
+  if (!initialized && loading) {
+    return (
+      <div className="min-h-screen bg-[#0A0A0F] flex items-center justify-center">
+        <div className="w-12 h-12 border-4 border-[#6EE7B7] border-t-transparent rounded-full animate-spin shadow-[0_0_30px_rgba(110,231,183,0.2)]" />
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-[#0A0A0F]">
       <div className="mesh-bg" />
@@ -44,6 +53,7 @@ function App() {
         <Route path="/how-it-works" element={<HowItWorks />} />
         <Route path="/charities" element={<Charities />} />
         <Route path="/charities/:slug" element={<CharityProfile />} />
+        <Route path="/auth/payment-success" element={<PaymentSuccess />} />
 
         {/* User Protected */}
         <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />

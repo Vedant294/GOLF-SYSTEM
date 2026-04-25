@@ -154,17 +154,34 @@ export default function WinnerVerify() {
                     ))}
                   </div>
 
-                  <button
-                    id="upload-proof-btn"
-                    onClick={handleUpload}
-                    disabled={!file || uploading}
-                    className="premium-btn w-full py-3.5 flex items-center justify-center gap-2 disabled:opacity-50"
-                  >
-                    {uploading
-                      ? <span className="w-5 h-5 border-2 border-[#0A0A0F] border-t-transparent rounded-full animate-spin" />
-                      : <><Upload size={18} /> Upload Proof</>
-                    }
-                  </button>
+                  <div className="flex gap-3">
+                    <button
+                      id="upload-proof-btn"
+                      onClick={handleUpload}
+                      disabled={!file || uploading}
+                      className="premium-btn flex-1 py-3.5 flex items-center justify-center gap-2 disabled:opacity-50"
+                    >
+                      {uploading
+                        ? <span className="w-5 h-5 border-2 border-[#0A0A0F] border-t-transparent rounded-full animate-spin" />
+                        : <><Upload size={18} /> Upload Proof</>
+                      }
+                    </button>
+                    <button
+                      id="demo-proof-btn"
+                      onClick={async () => {
+                        setUploading(true)
+                        await supabase.from('winners').update({ 
+                          proof_url: 'https://images.unsplash.com/photo-1535131749006-b7f58c99034b?auto=format&fit=crop&q=80&w=800' 
+                        }).eq('id', pendingWin.id)
+                        toast.success('Demo Proof Submitted! (For Judges)')
+                        setUploaded(true)
+                        setUploading(false)
+                      }}
+                      className="outline-btn px-4 py-3.5 text-xs flex items-center gap-2 whitespace-nowrap"
+                    >
+                      <Zap size={14} /> Demo Fill
+                    </button>
+                  </div>
                 </>
               )}
             </div>

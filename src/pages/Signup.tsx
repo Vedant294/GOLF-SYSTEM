@@ -1,449 +1,265 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { Eye, EyeOff, Trophy, Star, Check, ArrowRight, ArrowLeft, Search, Shield } from 'lucide-react'
-import toast from 'react-hot-toast'
-import { supabase } from '../lib/supabase'
-import { PLAN_DETAILS } from '../lib/stripe'
+import { Eye, EyeOff, Trophy, Star, Check, ArrowRight, ArrowLeft, Search, Shield, Lock, CreditCard, Heart, Zap } from 'lucide-react'
 import { useAuthStore } from '../store/useAuthStore'
-import type { Charity } from '../types'
+import toast from 'react-hot-toast'
+
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
 
 const accountSchema = z.object({
-  full_name: z.string().min(2, 'Name must be at least 2 characters'),
-  email: z.string().email('Invalid email'),
-  password: z.string()
-    .min(8, 'At least 8 characters')
-    .regex(/[A-Z]/, 'Must contain uppercase letter')
-    .regex(/[0-9]/, 'Must contain a number'),
+  full_name: z.string().min(2, 'Name must be 2-50 chars').max(50, 'Name must be 2-50 chars'),
+  email: z.string().email('Invalid email format'),
+  password: z.string().min(8, 'Min 8 characters').regex(/[A-Z]/).regex(/[^A-Za-z0-9]/),
 })
 type AccountData = z.infer<typeof accountSchema>
 
+const PLAN_DETAILS = {
+  monthly: { id: 'monthly', name: 'Monthly VIP', price: 499, period: '/mo', features: ['5 Draw Entries', 'Any Charity', 'Cancel anytime'], priceId: import.meta.env.VITE_STRIPE_MONTHLY_PRICE_ID },
+  yearly: { id: 'yearly', name: 'Yearly Legend', price: 4999, period: '/yr', features: ['60 Draw Entries', 'Any Charity', 'VIP Badge'], priceId: import.meta.env.VITE_STRIPE_YEARLY_PRICE_ID, popular: true }
+}
+
 const CHARITIES_STATIC = [
-  { id: '1', name: 'CRY India', slug: 'cry-india', category: 'Child Rights', description: 'Child Rights and You — protecting child rights since 1979.', image_url: 'https://images.unsplash.com/photo-1488521787991-ed7bbaae773c?w=300&h=200&fit=crop' },
-  { id: '2', name: 'Akshaya Patra', slug: 'akshaya-patra', category: 'Midday Meals', description: 'Fighting classroom hunger through the midday meal programme.', image_url: 'https://images.unsplash.com/photo-1593113598332-cd288d649433?w=300&h=200&fit=crop' },
-  { id: '3', name: 'Smile Foundation', slug: 'smile-foundation', category: 'Education', description: 'Education and healthcare for underprivileged children.', image_url: 'https://images.unsplash.com/photo-1497486751825-1233686d5d80?w=300&h=200&fit=crop' },
-  { id: '4', name: 'HelpAge India', slug: 'helpage-india', category: 'Elder Care', description: 'Empowering older persons to lead dignified lives.', image_url: 'https://images.unsplash.com/photo-1576091160550-2173dba999ef?w=300&h=200&fit=crop' },
-  { id: '5', name: 'GiveIndia', slug: 'give-india', category: 'Donation Hub', description: 'India\'s largest donation platform connecting donors and NGOs.', image_url: 'https://images.unsplash.com/photo-1532629345422-7515f3d16bb6?w=300&h=200&fit=crop' },
-  { id: '6', name: 'Sammaan Foundation', slug: 'sammaan-foundation', category: 'Dignity', description: 'Restoring dignity and rights for marginalised communities.', image_url: 'https://images.unsplash.com/photo-1469571486292-0ba58a3f068b?w=300&h=200&fit=crop' },
+  { id: '1', name: 'Golf for Kids', category: 'Children', image_url: 'https://images.unsplash.com/photo-1544367567-0f2fcb009e0b?auto=format&fit=crop&q=80&w=400' },
+  { id: '2', name: 'Green Links', category: 'Environment', image_url: 'https://images.unsplash.com/photo-1500673922987-e212871fec22?auto=format&fit=crop&q=80&w=400' }
 ]
 
-const STEPS = ['Account', 'Plan', 'Charity', 'Payment']
-
 export default function Signup() {
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const navigate = useNavigate()
-  const [step, setStep] = useState(0)
-  const [selectedPlan, setSelectedPlan] = useState<'monthly' | 'yearly'>(
-    (searchParams.get('plan') as 'monthly' | 'yearly') || 'monthly'
-  )
-  const [selectedCharity, setSelectedCharity] = useState<string>('')
+  const { user, refreshUser } = useAuthStore()
+
+  // 🚀 URL-BASED STEPS
+  const step = Number(searchParams.get('step')) || 0
+  const setStep = (newStep: number) => {
+    setSearchParams({ step: newStep.toString() })
+  }
+
+  const [selectedPlan, setSelectedPlan] = useState<'monthly' | 'yearly'>(() => (localStorage.getItem('signup_plan') as any) || 'monthly')
+  const [selectedCharity, setSelectedCharity] = useState<string>(() => localStorage.getItem('signup_charity') || '')
+  const [charityPct, setCharityPct] = useState(() => Number(localStorage.getItem('signup_pct')) || 10)
+
   const [charitySearch, setCharitySearch] = useState('')
-  const [charities, setCharities] = useState<Charity[]>([])
+  const [charities, setCharities] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
-  const [charityPct, setCharityPct] = useState(10)
   const [accountData, setAccountData] = useState<AccountData | null>(null)
-  const [userId, setUserId] = useState<string | null>(null)
+  
+  const [prebuiltUrl, setPrebuiltUrl] = useState<string | null>(null)
+  const [isPreparing, setIsPreparing] = useState(false)
+  const lastRequestKey = useRef<string>('')
 
-  const { register, handleSubmit, formState: { errors } } = useForm<AccountData>({
-    resolver: zodResolver(accountSchema),
-  })
+  const { register, handleSubmit, formState: { errors } } = useForm<AccountData>({ resolver: zodResolver(accountSchema) })
 
-  // Redirect already-active users away from signup
+  // Save selections but let URL handle the step
   useEffect(() => {
-    const check = async () => {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session?.user) return
-      const { data: profile } = await supabase
-        .from('profiles').select('subscription_status').eq('id', session.user.id).single()
-      if (profile?.subscription_status === 'active') navigate('/dashboard')
-    }
-    check()
-  }, [navigate])
+    localStorage.setItem('signup_plan', selectedPlan)
+    localStorage.setItem('signup_charity', selectedCharity)
+    localStorage.setItem('signup_pct', charityPct.toString())
+  }, [selectedPlan, selectedCharity, charityPct])
 
-  // Load charities + handle returning inactive user (skip to payment step)
+  // 🛡️ INTELLIGENT NAVIGATION
   useEffect(() => {
-    const fetchCharities = async () => {
-      const { data } = await supabase.from('charities').select('*').order('featured', { ascending: false })
-      if (data && data.length > 0) setCharities(data)
-      else setCharities(CHARITIES_STATIC as any)
+    if (user?.subscription_status === 'active') {
+      navigate('/dashboard', { replace: true })
+      return
     }
-    fetchCharities()
 
-    const checkReturning = async () => {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session?.user) return
-      const { data: profile } = await supabase
-        .from('profiles').select('*').eq('id', session.user.id).single()
-      if (profile && profile.subscription_status === 'inactive') {
-        setUserId(profile.id)
-        setAccountData({ full_name: profile.full_name || '', email: profile.email || '', password: '' })
-        setSelectedPlan(profile.subscription_plan || 'monthly')
-        setSelectedCharity(profile.charity_id || '')
-        setCharityPct(profile.charity_contribution_pct || 10)
-        setStep(parseInt(searchParams.get('step') ?? '3'))
-      }
+    if (!user && step !== 0) {
+      setStep(0) // New users must start at account
+    } else if (user && step === 0) {
+      setStep(1) // Returning inactive users skip to plan
     }
-    checkReturning()
+  }, [user, navigate, step])
+
+  useEffect(() => {
+    fetch(`${SUPABASE_URL}/rest/v1/charities?select=*`, { headers: { apikey: SUPABASE_ANON_KEY } })
+      .then(r => r.json()).then(d => setCharities(d.length > 0 ? d : CHARITIES_STATIC)).catch(() => setCharities(CHARITIES_STATIC))
   }, [])
 
-  const filteredCharities = (charities.length > 0 ? charities : CHARITIES_STATIC).filter(c =>
-    c.name.toLowerCase().includes(charitySearch.toLowerCase()) ||
-    c.category.toLowerCase().includes(charitySearch.toLowerCase())
-  )
-
-  const onAccountSubmit = (data: AccountData) => {
-    setAccountData(data)
-    setStep(1)
+  const getAuthToken = () => {
+    const key = Object.keys(localStorage).find(k => k.startsWith('sb-') && k.endsWith('-auth-token'))
+    return key ? JSON.parse(localStorage.getItem(key) || '{}').access_token : null
   }
 
-  // ── Real Stripe Checkout ──
-  // 1. Create Supabase account (if not already logged in)
-  // 2. Save charity preference to profile
-  // 3. Call edge function → get Stripe Checkout URL → redirect
-  // Stripe webhook handles activation after payment succeeds
-  const handlePayment = async () => {
-    if (!accountData) return
+  const generateStripeUrl = useCallback(async () => {
+    const userId = user?.id
+    const email = accountData?.email || user?.email
+    const token = getAuthToken()
+    if (!userId || !email || !token) return
+
+    const requestKey = `${selectedPlan}-${selectedCharity}-${charityPct}-${userId}`
+    if (requestKey === lastRequestKey.current) return
+    
+    lastRequestKey.current = requestKey
+    setIsPreparing(true)
+
+    try {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/create-checkout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({
+          priceId: PLAN_DETAILS[selectedPlan].priceId,
+          userId, plan: selectedPlan, charityId: selectedCharity || null, charityPct,
+          successUrl: `${window.location.origin}/auth/payment-success?session_id={CHECKOUT_SESSION_ID}&email=${encodeURIComponent(email)}`,
+          cancelUrl: `${window.location.origin}/signup?step=3`, 
+        }),
+      })
+      const data = await res.json()
+      if (data.url) setPrebuiltUrl(data.url)
+    } catch (e) { console.error('Pre-build error:', e) } finally { setIsPreparing(false) }
+  }, [user?.id, user?.email, accountData?.email, selectedPlan, selectedCharity, charityPct])
+
+  useEffect(() => {
+    if (step >= 1) generateStripeUrl()
+  }, [step, selectedPlan, selectedCharity, charityPct, generateStripeUrl])
+
+  const onAccountSubmit = async (data: AccountData) => {
     setLoading(true)
     try {
-      // Step 1: Get or create auth user
-      let currentUserId = userId
-      const { data: { session } } = await supabase.auth.getSession()
-
-      if (session?.user) {
-        currentUserId = session.user.id
-      } else {
-        // Create account
-        const { data: authData, error: signupError } = await supabase.auth.signUp({
-          email: accountData.email,
-          password: accountData.password,
-          options: { data: { full_name: accountData.full_name } },
-        })
-        if (signupError) {
-          if (signupError.message.includes('already registered')) {
-            // Already exists — just sign them in
-            const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-              email: accountData.email,
-              password: accountData.password,
-            })
-            if (signInError) {
-              toast.error('Email already registered. Please sign in.')
-              navigate('/login')
-              return
-            }
-            currentUserId = signInData.user!.id
-          } else {
-            throw signupError
-          }
-        } else {
-          if (!authData.user) throw new Error('Account creation failed')
-          currentUserId = authData.user.id
-
-          // When email confirmation is OFF, signUp returns a session directly
-          // Use it — no need for a separate signInWithPassword call
-          if (authData.session) {
-            await supabase.auth.setSession({
-              access_token: authData.session.access_token,
-              refresh_token: authData.session.refresh_token,
-            })
-          } else {
-            // Fallback: sign in with password
-            const { error: signInError } = await supabase.auth.signInWithPassword({
-              email: accountData.email,
-              password: accountData.password,
-            })
-            if (signInError) console.error('Auto sign-in failed:', signInError)
-          }
-        }
-      }
-
-      setUserId(currentUserId)
-
-      // Small wait to ensure session is persisted to localStorage
-      // before browser navigates away to Stripe
-      await new Promise(resolve => setTimeout(resolve, 500))
-
-      // Step 2: Save charity preference before redirecting to Stripe
-      await supabase.from('profiles').update({
-        charity_id: selectedCharity || null,
-        charity_contribution_pct: charityPct,
-        subscription_plan: selectedPlan,
-      }).eq('id', currentUserId)
-
-      // Step 3: Create Stripe Checkout session via edge function
-      const appUrl = import.meta.env.VITE_APP_URL || window.location.origin
-      const { data, error } = await supabase.functions.invoke('create-checkout', {
-        body: {
-          priceId: PLAN_DETAILS[selectedPlan].priceId,
-          userId: currentUserId,
-          plan: selectedPlan,
-          charityId: selectedCharity || null,
-          charityPct,
-          successUrl: `${appUrl}/dashboard?success=true`,
-          cancelUrl: `${appUrl}/signup?step=3`,
-        },
+      const res = await fetch(`${SUPABASE_URL}/auth/v1/signup`, {
+        method: 'POST',
+        headers: { 'apikey': SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: data.email, password: data.password, data: { full_name: data.full_name } }),
       })
-
-      if (error || !data?.url) throw new Error(error?.message || 'Could not create checkout session')
-
-      // Step 4: Redirect to Stripe Checkout (test mode — no real money)
-      window.location.href = data.url
-    } catch (err: any) {
-      toast.error(err.message || 'Something went wrong. Please try again.')
-      setLoading(false)
-    }
+      const d = await res.json()
+      if (!res.ok) throw new Error(d.msg || 'Signup failed')
+      
+      setAccountData(data)
+      setStep(1)
+      if (d.access_token) {
+        localStorage.setItem(`sb-${SUPABASE_URL.split('//')[1].split('.')[0]}-auth-token`, JSON.stringify({ access_token: d.access_token, refresh_token: d.refresh_token, expires_at: d.expires_at, user: d.user }))
+        refreshUser(true)
+      }
+    } catch (err: any) { toast.error(err.message) } finally { setLoading(false) }
   }
 
+  const handlePayment = async () => {
+    if (prebuiltUrl) { window.location.replace(prebuiltUrl); return }
+    setLoading(true)
+    const token = getAuthToken()
+    try {
+      const email = accountData?.email || user?.email
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/create-checkout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({
+          priceId: PLAN_DETAILS[selectedPlan].priceId,
+          userId: user?.id, plan: selectedPlan, charityId: selectedCharity || null, charityPct,
+          successUrl: `${window.location.origin}/auth/payment-success?session_id={CHECKOUT_SESSION_ID}&email=${encodeURIComponent(email || '')}`,
+          cancelUrl: `${window.location.origin}/signup?step=3`,
+        }),
+      })
+      const data = await res.json()
+      if (data.url) window.location.href = data.url
+      else throw new Error(data.error || 'Checkout failed')
+    } catch (e: any) { toast.error(e.message); setLoading(false) }
+  }
+
+  const STEPS = [
+    { name: 'Account', icon: <Lock size={18} /> },
+    { name: 'Plan', icon: <CreditCard size={18} /> },
+    { name: 'Charity', icon: <Heart size={18} /> },
+    { name: 'Review', icon: <Trophy size={18} /> }
+  ]
+
   return (
-    <div className="min-h-screen flex items-center justify-center p-6 pt-24 pb-12">
-      <div className="w-full max-w-2xl">
-        <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }}>
-          {/* Header */}
-          <div className="text-center mb-8">
-            <Link to="/" className="inline-flex items-center gap-3 mb-6">
-              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#6EE7B7] to-[#3B82F6] flex items-center justify-center shadow-[0_0_30px_rgba(110,231,183,0.3)]">
-                <Trophy size={24} className="text-[#0A0A0F]" />
+    <div className="page-wrapper min-h-screen bg-[#0A0A0F] pt-24 pb-12 relative overflow-hidden">
+      <div className="mesh-bg opacity-20" />
+      <div className="section-container relative z-10 max-w-4xl">
+        <div className="flex justify-between mb-12 relative">
+          <div className="absolute top-5 left-0 w-full h-px bg-white/10" />
+          {STEPS.map((s, i) => (
+            <div key={i} className="relative z-10 flex flex-col items-center gap-2">
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${step >= i ? 'bg-[#6EE7B7] text-[#0A0A0F] shadow-[0_0_20px_rgba(110,231,183,0.3)]' : 'bg-[#1A1A2E] text-[#64748B]'}`}>
+                {step > i ? <Check size={18} /> : s.icon}
               </div>
-              <span className="font-syne font-800 text-2xl text-white">Golff</span>
-            </Link>
-            <h1 className="font-syne font-800 text-3xl">Create Your Account</h1>
-          </div>
+              <span className={`text-[10px] font-800 uppercase tracking-widest ${step >= i ? 'text-white' : 'text-[#64748B]'}`}>{s.name}</span>
+            </div>
+          ))}
+        </div>
 
-          {/* Progress */}
-          <div className="flex items-center justify-center gap-0 mb-10">
-            {STEPS.map((s, i) => (
-              <div key={s} className="flex items-center">
-                <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-500 transition-all ${
-                  i === step ? 'bg-[rgba(110,231,183,0.15)] text-[#6EE7B7] border border-[rgba(110,231,183,0.3)]' :
-                  i < step ? 'text-[#6EE7B7]' : 'text-[#374151]'
-                }`}>
-                  {i < step ? <Check size={14} /> : <span className="w-5 h-5 rounded-full border border-current flex items-center justify-center text-xs">{i + 1}</span>}
-                  <span className="hidden sm:inline">{s}</span>
+        <div className="glass-card p-8 md:p-12 max-w-2xl mx-auto border border-white/5">
+          <AnimatePresence mode="wait">
+            {step === 0 && (
+              <motion.div key="s0" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
+                <h1 className="text-3xl font-syne font-800 mb-2 text-white text-center">Join Golff</h1>
+                <p className="text-[#94A3B8] mb-8 text-center">Create your account to start winning.</p>
+                <form onSubmit={handleSubmit(onAccountSubmit)} className="space-y-6">
+                  <div>
+                    <input {...register('full_name')} placeholder="Full Name" className="input-field" />
+                    <p className="text-[10px] text-[#64748B] mt-1.5 ml-1 font-700 uppercase tracking-wider">Characters from 2 - 50</p>
+                  </div>
+                  <div>
+                    <input {...register('email')} placeholder="Email" className="input-field" />
+                    <p className="text-[10px] text-[#64748B] mt-1.5 ml-1 font-700 uppercase tracking-wider">e.g. username@gmail.com</p>
+                  </div>
+                  <div>
+                    <div className="relative">
+                      <input {...register('password')} type={showPassword ? 'text' : 'password'} placeholder="Password" className="input-field" />
+                      <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#64748B]">{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}</button>
+                    </div>
+                    <p className="text-[10px] text-[#64748B] mt-1.5 ml-1 font-700 uppercase tracking-wider">Min 8 characters, 1 uppercase, 1 special character</p>
+                  </div>
+                  <button type="submit" disabled={loading} className="premium-btn w-full mt-2 py-4">{loading ? 'Creating Account...' : 'Continue'}</button>
+                </form>
+              </motion.div>
+            )}
+
+            {step === 1 && (
+              <motion.div key="s1" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
+                <h2 className="text-2xl font-syne font-800 mb-6 text-white text-center">Select Your Plan</h2>
+                <div className="grid grid-cols-2 gap-4">
+                  {Object.values(PLAN_DETAILS).map(p => (
+                    <button key={p.id} onClick={() => setSelectedPlan(p.id as any)} className={`relative p-6 rounded-2xl border-2 text-left transition-all duration-300 ${selectedPlan === p.id ? 'border-[#6EE7B7] bg-[#6EE7B7]/5 ring-4 ring-[#6EE7B7]/10' : 'border-white/5 hover:border-white/10'}`}>
+                      <h3 className="font-700 mb-1 text-white">{p.name}</h3>
+                      <p className="text-2xl font-grotesk font-800 text-[#6EE7B7]">₹{p.price.toLocaleString('en-IN')}</p>
+                    </button>
+                  ))}
                 </div>
-                {i < STEPS.length - 1 && (
-                  <div className={`w-8 h-px mx-1 ${i < step ? 'bg-[#6EE7B7]' : 'bg-[rgba(255,255,255,0.1)]'}`} />
-                )}
-              </div>
-            ))}
-          </div>
+                <button onClick={() => setStep(2)} className="premium-btn w-full mt-8 py-4 shadow-[0_10px_20px_-5px_rgba(110,231,183,0.3)]">Next: Charity</button>
+              </motion.div>
+            )}
 
-          <div className="glass-card p-8">
-            <AnimatePresence mode="wait">
-              {/* Step 0: Account */}
-              {step === 0 && (
-                <motion.div key="account" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
-                  <h2 className="font-syne font-700 text-xl mb-6">Your Details</h2>
-                  <form id="signup-form" onSubmit={handleSubmit(onAccountSubmit)} className="space-y-5">
-                    <div>
-                      <label className="block text-[#94A3B8] text-sm font-500 mb-2">Full Name</label>
-                      <input id="signup-name" className="input-field" placeholder="Arjun Sharma" {...register('full_name')} />
-                      {errors.full_name && <p className="text-[#F87171] text-xs mt-1">{errors.full_name.message}</p>}
-                    </div>
-                    <div>
-                      <label className="block text-[#94A3B8] text-sm font-500 mb-2">Email Address</label>
-                      <input id="signup-email" type="email" className="input-field" placeholder="you@example.com" {...register('email')} />
-                      {errors.email && <p className="text-[#F87171] text-xs mt-1">{errors.email.message}</p>}
-                    </div>
-                    <div>
-                      <label className="block text-[#94A3B8] text-sm font-500 mb-2">Password</label>
-                      <div className="relative">
-                        <input id="signup-password" type={showPassword ? 'text' : 'password'} className="input-field pr-12" placeholder="Min 8 chars, 1 uppercase, 1 number" {...register('password')} />
-                        <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#64748B]">
-                          {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                        </button>
-                      </div>
-                      {errors.password && <p className="text-[#F87171] text-xs mt-1">{errors.password.message}</p>}
-                    </div>
-                    <button id="next-step-1" type="submit" className="premium-btn w-full py-3.5 flex items-center justify-center gap-2">
-                      Continue <ArrowRight size={18} />
+            {step === 2 && (
+              <motion.div key="s2" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
+                <h2 className="text-2xl font-syne font-800 mb-4 text-white text-center">Support a Cause</h2>
+                <div className="grid grid-cols-2 gap-3 mb-6 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
+                  {charities.map(c => (
+                    <button key={c.id} onClick={() => setSelectedCharity(c.id)} className={`p-3 rounded-xl border-2 text-left transition-all ${selectedCharity === c.id ? 'border-[#6EE7B7] bg-[#6EE7B7]/5' : 'border-white/5'}`}>
+                      <img src={c.image_url} className="w-full h-20 object-cover rounded-lg mb-2" />
+                      <p className="text-xs font-700 truncate text-center text-white">{c.name}</p>
                     </button>
-                  </form>
-                  <p className="text-center text-[#64748B] text-sm mt-4">
-                    Already have an account?{' '}
-                    <Link to="/login" className="text-[#6EE7B7] font-600">Sign in</Link>
-                  </p>
-                </motion.div>
-              )}
+                  ))}
+                </div>
+                <div className="flex flex-col gap-3">
+                  <button onClick={() => setStep(3)} disabled={!selectedCharity} className="premium-btn w-full py-4 disabled:opacity-50">Final Review</button>
+                  <button onClick={() => setStep(1)} className="text-[#64748B] text-xs font-700 uppercase tracking-widest py-2 hover:text-white transition-colors">← Back to Plans</button>
+                </div>
+              </motion.div>
+            )}
 
-              {/* Step 1: Plan */}
-              {step === 1 && (
-                <motion.div key="plan" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
-                  <h2 className="font-syne font-700 text-xl mb-6">Choose Your Plan</h2>
-                  <div className="grid md:grid-cols-2 gap-4 mb-6">
-                    {(['monthly', 'yearly'] as const).map(plan => {
-                      const p = PLAN_DETAILS[plan]
-                      const selected = selectedPlan === plan
-                      return (
-                        <button
-                          key={plan}
-                          id={`plan-${plan}`}
-                          onClick={() => setSelectedPlan(plan)}
-                          className={`text-left p-6 rounded-2xl border-2 transition-all duration-200 ${
-                            selected
-                              ? 'border-[#6EE7B7] bg-[rgba(110,231,183,0.08)]'
-                              : 'border-white/10 hover:border-white/20'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between mb-3">
-                            <span className="font-syne font-700 text-lg">{p.name}</span>
-                            {selected && <Check size={18} className="text-[#6EE7B7]" />}
-                          </div>
-                          {p.savings && <span className="badge-active text-xs">{p.savings}</span>}
-                          <div className="mt-3 mb-4">
-                            <span className="font-syne font-800 text-3xl">₹{p.price.toLocaleString('en-IN')}</span>
-                            <span className="text-[#64748B] text-sm">{p.period}</span>
-                          </div>
-                          <ul className="space-y-2">
-                            {p.features.slice(0, 3).map(f => (
-                              <li key={f} className="flex items-center gap-2 text-[#94A3B8] text-xs">
-                                <Star size={11} className="text-[#6EE7B7] shrink-0" /> {f}
-                              </li>
-                            ))}
-                          </ul>
-                        </button>
-                      )
-                    })}
-                  </div>
-                  <div className="flex gap-3">
-                    <button onClick={() => setStep(0)} className="outline-btn flex-1 flex items-center justify-center gap-2 py-3">
-                      <ArrowLeft size={16} /> Back
-                    </button>
-                    <button id="next-step-2" onClick={() => setStep(2)} className="premium-btn flex-1 flex items-center justify-center gap-2 py-3">
-                      Continue <ArrowRight size={18} />
-                    </button>
-                  </div>
-                </motion.div>
-              )}
-
-              {/* Step 2: Charity */}
-              {step === 2 && (
-                <motion.div key="charity" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
-                  <h2 className="font-syne font-700 text-xl mb-2">Choose Your Charity</h2>
-                  <p className="text-[#64748B] text-sm mb-5">Min 10% of your subscription will go to this charity.</p>
-                  
-                  <div className="relative mb-4">
-                    <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#64748B]" />
-                    <input
-                      className="input-field pl-9"
-                      placeholder="Search charities..."
-                      value={charitySearch}
-                      onChange={e => setCharitySearch(e.target.value)}
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3 mb-5 max-h-60 overflow-y-auto">
-                    {filteredCharities.map(c => (
-                      <button
-                        key={c.id}
-                        id={`charity-${c.id}`}
-                        onClick={() => setSelectedCharity(c.id)}
-                        className={`text-left rounded-xl border-2 transition-all p-3 ${
-                          selectedCharity === c.id
-                            ? 'border-[#6EE7B7] bg-[rgba(110,231,183,0.08)]'
-                            : 'border-white/10 hover:border-white/20'
-                        }`}
-                      >
-                        <img src={c.image_url} alt={c.name} className="w-full h-20 object-cover rounded-lg mb-2" />
-                        <p className="font-inter font-600 text-xs text-white truncate">{c.name}</p>
-                        <p className="text-[#64748B] text-xs">{c.category}</p>
-                      </button>
-                    ))}
-                  </div>
-
-                  <div className="mb-6">
-                    <label className="block text-[#94A3B8] text-sm font-500 mb-2">
-                      Charity Contribution: <span className="text-[#6EE7B7] font-700">{charityPct}%</span>
-                      <span className="text-[#64748B] text-xs ml-2">(₹{Math.round(PLAN_DETAILS[selectedPlan].price * charityPct / 100)}/mo)</span>
-                    </label>
-                    <input
-                      type="range" min={10} max={50} step={5}
-                      value={charityPct}
-                      onChange={e => setCharityPct(Number(e.target.value))}
-                      className="w-full accent-[#6EE7B7]"
-                    />
-                    <div className="flex justify-between text-[#64748B] text-xs mt-1">
-                      <span>10% (min)</span><span>50% (max)</span>
-                    </div>
-                  </div>
-
-                  <div className="flex gap-3">
-                    <button onClick={() => setStep(1)} className="outline-btn flex-1 flex items-center justify-center gap-2 py-3">
-                      <ArrowLeft size={16} /> Back
-                    </button>
-                    <button
-                      id="next-step-3"
-                      onClick={() => setStep(3)}
-                      disabled={!selectedCharity}
-                      className="premium-btn flex-1 flex items-center justify-center gap-2 py-3 disabled:opacity-50"
-                    >
-                      Continue <ArrowRight size={18} />
-                    </button>
-                  </div>
-                </motion.div>
-              )}
-
-              {/* Step 3: Payment */}
-              {step === 3 && (
-                <motion.div key="payment" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
-                  <h2 className="font-syne font-700 text-xl mb-6">Confirm & Pay</h2>
-                  
-                  {/* Summary */}
-                  <div className="space-y-3 mb-6">
-                    <div className="glass-card p-4">
-                      <p className="text-[#64748B] text-xs mb-1">Your Details</p>
-                      <p className="font-500 text-sm">{accountData?.full_name}</p>
-                      <p className="text-[#94A3B8] text-xs">{accountData?.email}</p>
-                    </div>
-                    <div className="glass-card p-4">
-                      <p className="text-[#64748B] text-xs mb-1">Plan</p>
-                      <div className="flex items-center justify-between">
-                        <span className="font-600 text-sm capitalize">{selectedPlan}</span>
-                        <span className="text-[#6EE7B7] font-grotesk font-700">
-                          ₹{PLAN_DETAILS[selectedPlan].price.toLocaleString('en-IN')}{PLAN_DETAILS[selectedPlan].period}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="glass-card p-4">
-                      <p className="text-[#64748B] text-xs mb-1">Charity</p>
-                      <div className="flex items-center justify-between">
-                        <span className="font-600 text-sm">
-                          {(charities.length > 0 ? charities : CHARITIES_STATIC).find(c => c.id === selectedCharity)?.name || 'None'}
-                        </span>
-                        <span className="badge-active">{charityPct}% donation</span>
-                      </div>
-                    </div>
-                    <div className="glass-card p-3 border-[rgba(110,231,183,0.15)] bg-[rgba(110,231,183,0.03)]">
-                      <p className="text-[#6EE7B7] text-xs font-600 flex items-center gap-2">
-                        <Shield size={14} /> Secured by Stripe · Test mode · No real charges
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex gap-3">
-                    <button onClick={() => setStep(2)} className="outline-btn flex-1 flex items-center justify-center gap-2 py-3">
-                      <ArrowLeft size={16} /> Back
-                    </button>
-                    <button
-                      id="pay-btn"
-                      onClick={handlePayment}
-                      disabled={loading}
-                      className="premium-btn flex-1 flex items-center justify-center gap-2 py-3 disabled:opacity-60"
-                    >
-                      {loading ? (
-                        <span className="w-5 h-5 border-2 border-[#0A0A0F] border-t-transparent rounded-full animate-spin" />
-                      ) : (
-                        <><ArrowRight size={18} /> Pay Now</>
-                      )}
-                    </button>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-        </motion.div>
+            {step === 3 && (
+              <motion.div key="s3" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}>
+                <h2 className="text-3xl font-syne font-800 mb-8 text-center text-white">Final Review</h2>
+                <div className="space-y-4 mb-10">
+                  <div className="glass-card p-5 flex justify-between items-center"><span className="text-[#64748B]">Plan</span><span className="font-700 uppercase text-white">{selectedPlan}</span></div>
+                  <div className="glass-card p-5 flex justify-between items-center"><span className="text-[#64748B]">Total</span><span className="text-[#6EE7B7] font-800 text-xl">₹{PLAN_DETAILS[selectedPlan].price.toLocaleString('en-IN')}</span></div>
+                </div>
+                <div className="flex flex-col gap-4">
+                  <button onClick={handlePayment} disabled={loading} className="premium-btn w-full py-5 text-lg flex items-center justify-center gap-3">
+                    {isPreparing && !prebuiltUrl ? <><span className="w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" /> Preparing...</> : <><Zap size={20} /> Pay Now ⚡</>}
+                  </button>
+                  <button onClick={() => setStep(2)} className="text-[#64748B] text-xs font-700 uppercase tracking-widest py-2 hover:text-white transition-colors">← Back to Charity</button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
       </div>
     </div>
   )

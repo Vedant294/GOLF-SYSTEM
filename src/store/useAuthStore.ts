@@ -1,116 +1,125 @@
 import { create } from 'zustand'
-import { Session } from '@supabase/supabase-js'
-import { supabase } from '../lib/supabase'
 import type { Profile } from '../types'
 
-interface AuthState {
-  user: Profile | null
-  session: Session | null
-  loading: boolean
-  initialized: boolean
-  setUser: (user: Profile | null) => void
-  setSession: (session: Session | null) => void
-  setLoading: (loading: boolean) => void
-  signOut: () => Promise<void>
-  refreshUser: () => Promise<void>
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
+
+export function getStoredToken(): string | null {
+  try {
+    const key = Object.keys(localStorage).find((k) => k.startsWith('sb-') && k.endsWith('-auth-token'))
+    if (!key) return null
+    const data = JSON.parse(localStorage.getItem(key) || '{}')
+    if (data.expires_at && data.expires_at * 1000 < Date.now()) return null
+    return data.access_token || null
+  } catch { return null }
 }
 
-export const useAuthStore = create<AuthState>((set, get) => ({
+export const useAuthStore = create<{
+  user: Profile | null
+  loading: boolean
+  initialized: boolean
+  justPaid: boolean
+  signOut: () => void
+  refreshUser: (silent?: boolean) => Promise<void>
+  setSubscriptionActive: (plan?: string) => void
+}>((set, get) => ({
   user: null,
-  session: null,
   loading: true,
   initialized: false,
+  justPaid: localStorage.getItem('just_paid_expiry') ? Number(localStorage.getItem('just_paid_expiry')) > Date.now() : false,
 
-  setUser: (user) => {
-    set({ user })
-    if (user) {
-      localStorage.setItem('golff_user_cache', JSON.stringify(user))
-    } else {
-      localStorage.removeItem('golff_user_cache')
-    }
-  },
-  setSession: (session) => set({ session }),
-  setLoading: (loading) => set({ loading }),
-
-  signOut: async () => {
-    // 1. Aggressive local wipe
-    localStorage.removeItem('golff_user_cache')
-    localStorage.removeItem('golff_mock_user')
-    
-    // 2. Clear state instantly to stop all reactivity
-    set({ 
-      user: null, 
-      session: null, 
-      initialized: false, // Reset initialization so App.tsx can re-init cleanly
-      loading: false 
-    })
-
-    // 3. Official Supabase sign out (Background)
-    try {
-      await supabase.auth.signOut()
-    } catch (err) {
-      console.warn('Supabase signOut error (ignoring):', err)
-    }
-  },
-
-  refreshUser: async () => {
-    // 1. Instant Cache Load (Optimistic)
-    const cachedUser = localStorage.getItem('golff_user_cache')
-    const mockUser = localStorage.getItem('golff_mock_user')
-    
-    if (cachedUser && !get().user) {
-      set({ user: JSON.parse(cachedUser), initialized: true, loading: false })
-    } else if (mockUser && !get().user) {
-      set({ user: JSON.parse(mockUser), initialized: true, loading: false })
-    }
-
-    // 2. Real-time Verification (Truth)
-    try {
-      const { data: { session } } = await supabase.auth.getSession()
-      set({ session })
-      
-      if (!session?.user) {
-        if (!mockUser) {
-          set({ user: null, initialized: true, loading: false })
-        }
-        return
+  signOut: () => {
+    // 🛡️ SMART SIGN OUT: Clear auth tokens but keep the 'Just Paid' memory
+    Object.keys(localStorage).forEach(key => {
+      if (key.startsWith('sb-') && key.endsWith('-auth-token')) {
+        localStorage.removeItem(key)
       }
+    })
+    set({ user: null, initialized: true, loading: false, justPaid: get().justPaid })
+  },
 
-      const { data: profile } = await supabase
+  refreshUser: async (silent = false) => {
+    try {
+      if (!silent) set({ loading: true })
+
+      const token = getStoredToken()
+      if (!token) { set({ user: null, initialized: true, loading: false }); return }
+
+      // ⚡ FAST AUTH FETCH
+      const userRes = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+        headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${token}` },
+      })
+      if (!userRes.ok) { set({ user: null, initialized: true, loading: false }); return }
+      const authUser = await userRes.json()
+
+      // 🛡️ SYNC GUARD & REAL-TIME
+      const { supabase } = await import('../lib/supabase')
+      const { data: profileData } = await supabase
         .from('profiles')
         .select('*')
-        .eq('id', session.user.id)
+        .eq('id', authUser.id)
         .single()
+      
+      let profile = profileData as Profile | null
 
-      if (profile) {
-        set({ user: profile, initialized: true, loading: false })
-        localStorage.setItem('golff_user_cache', JSON.stringify(profile))
-      } else {
-        // PRD §04/§06: Self-Healing Profile (Auto-Repair)
-        // If auth user exists but profile row is missing, handle gracefully by creating it
-        const { data: newProfile, error: createError } = await supabase
-          .from('profiles')
-          .insert({
-            id: session.user.id,
-            email: session.user.email,
-            full_name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0],
-            role: session.user.app_metadata?.role || 'user',
-            subscription_status: session.user.app_metadata?.status || 'inactive'
-          })
-          .select()
-          .single()
-
-        if (!createError && newProfile) {
-          set({ user: newProfile, initialized: true, loading: false })
-          localStorage.setItem('golff_user_cache', JSON.stringify(newProfile))
-        } else {
-          set({ user: null, initialized: true, loading: false })
-          localStorage.removeItem('golff_user_cache')
+      // 🩹 SELF-HEALING: If DB says inactive, check the official payments table
+      if (profile && profile.subscription_status === 'inactive') {
+        const { data: payments } = await supabase
+          .from('subscription_payments')
+          .select('id')
+          .eq('user_id', authUser.id)
+          .eq('status', 'paid')
+          .maybeSingle()
+        
+        if (payments) {
+          profile.subscription_status = 'active'
+          profile.subscription_plan = profile.subscription_plan || 'monthly'
+          
+          // Force update the DB
+          await supabase.from('profiles').update({ subscription_status: 'active' }).eq('id', authUser.id)
         }
       }
-    } catch (error) {
-      console.error('Refresh User failed:', error)
-      set({ initialized: true, loading: false })
+
+      const expiry = Number(localStorage.getItem('just_paid_expiry') || 0)
+      if (profile && expiry > Date.now() && profile.subscription_status === 'inactive') {
+        profile.subscription_status = 'active'
+      }
+
+      set({ user: profile || null, initialized: true, loading: false })
+      return profile
+    } catch (error) { set({ user: null, initialized: true, loading: false }) }
+  },
+
+  // 🚀 REAL-TIME ENGINE: Subscribe to profile changes
+  subscribeToProfile: () => {
+    const user = get().user
+    if (!user) return
+
+    const { supabase } = import('../lib/supabase') // Dynamic import to avoid cycles
+    supabase.then(({ supabase }) => {
+      supabase
+        .channel(`profile-${user.id}`)
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${user.id}` }, 
+          (payload) => {
+            console.log('⚡ Real-time Profile Update:', payload.new)
+            set({ user: payload.new as Profile })
+          }
+        )
+        .subscribe()
+    })
+  },
+
+  setSubscriptionActive: (plan = 'monthly') => {
+    // Set expiry for 2 minutes from now
+    const expiry = Date.now() + 120000 
+    localStorage.setItem('just_paid_expiry', expiry.toString())
+    
+    const currentUser = get().user
+    if (currentUser) {
+      set({ 
+        justPaid: true,
+        user: { ...currentUser, subscription_status: 'active', subscription_plan: plan } 
+      })
     }
   },
 }))

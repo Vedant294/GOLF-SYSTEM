@@ -160,7 +160,7 @@ export default function AdminDraws() {
           prize_amount: prizeAmount,
         })
 
-        if (prizeTier && prizeAmount > 0) {
+        if (prizeTier) {
           await supabase.from('winners').insert({
             draw_id: simulation.draw.id,
             user_id: profile.id,

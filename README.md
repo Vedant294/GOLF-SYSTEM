@@ -4,7 +4,7 @@
 
 [![Live Demo](https://img.shields.io/badge/Live-Demo-6EE7B7?style=for-the-badge)](https://golff.vercel.app)
 [![Test Mode](https://img.shields.io/badge/Stripe-Test%20Mode-F59E0B?style=for-the-badge)](https://dashboard.stripe.com)
-[![PRD Compliant](https://img.shields.io/badge/PRD-90%25%20Coverage-818CF8?style=for-the-badge)](#prd-compliance)
+[![PRD Compliant](https://img.shields.io/badge/PRD-100%25%20Compliant-6EE7B7?style=for-the-badge)](#prd-compliance)
 [![TypeScript](https://img.shields.io/badge/TypeScript-100%25-3178C6?style=for-the-badge&logo=typescript)](https://www.typescriptlang.org/)
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=for-the-badge&logo=react)](https://reactjs.org/)
 

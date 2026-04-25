@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { History, Trophy, CheckCircle, XCircle, Loader2 } from 'lucide-react'
 import { format } from 'date-fns'
-import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/useAuthStore'
 import type { Draw, DrawEntry } from '../types'
 
@@ -23,27 +22,47 @@ export default function Draws() {
 
   const fetchDraws = async () => {
     setLoading(true)
-    const { data: drawData } = await supabase
-      .from('draws')
-      .select('*')
-      .eq('status', 'published')
-      .order('created_at', { ascending: false })
+    try {
+      const storageKey = Object.keys(localStorage).find(k => k.startsWith('sb-') && k.endsWith('-auth-token'))
+      const sessionData = storageKey ? JSON.parse(localStorage.getItem(storageKey) || '{}') : null
+      const accessToken = sessionData?.access_token
 
-    if (drawData) {
-      const enriched = await Promise.all(
-        drawData.map(async (draw) => {
-          const { data: entry } = await supabase
-            .from('draw_entries')
-            .select('*')
-            .eq('draw_id', draw.id)
-            .eq('user_id', user!.id)
-            .single()
-          return { ...draw, entry: entry || undefined }
-        })
+      const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
+      const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
+
+      const headers: Record<string, string> = {
+        'apikey': SUPABASE_ANON_KEY,
+        'Content-Type': 'application/json',
+      }
+      if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`
+
+      const drawRes = await fetch(
+        `${SUPABASE_URL}/rest/v1/draws?status=eq.published&order=created_at.desc&select=*`,
+        { headers }
       )
-      setDraws(enriched)
+      const drawData = await drawRes.json()
+
+      if (Array.isArray(drawData) && drawData.length > 0) {
+        const enriched = await Promise.all(
+          drawData.map(async (draw) => {
+            const entryRes = await fetch(
+              `${SUPABASE_URL}/rest/v1/draw_entries?draw_id=eq.${draw.id}&user_id=eq.${user!.id}&select=*`,
+              { headers }
+            )
+            const entries = await entryRes.json()
+            return { ...draw, entry: entries?.[0] || undefined }
+          })
+        )
+        setDraws(enriched)
+      } else {
+        setDraws([])
+      }
+    } catch (e) {
+      console.error('Draws fetch error:', e)
+      setDraws([])
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   const openDraw = (draw: DrawWithEntry) => {

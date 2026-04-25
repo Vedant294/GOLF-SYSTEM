@@ -27,40 +27,14 @@ serve(async (req) => {
 
   try {
     switch (event.type) {
-
-      // ── Checkout completed → activate subscription OR confirm donation ──
       case 'checkout.session.completed': {
         const session = event.data.object as Stripe.Checkout.Session
         const meta = session.metadata ?? {}
-
-        // Independent donation
-        if (meta.type === 'donation') {
-          const { user_id, charity_id, amount } = meta
-          if (!user_id) break
-
-          // Mark donation completed
-          await supabase.from('donations')
-            .update({ status: 'completed' })
-            .eq('stripe_payment_intent_id', session.payment_intent as string)
-
-          // Update charity total_raised
-          if (charity_id) {
-            await supabase.rpc('increment_charity_raised', {
-              charity_id_input: charity_id,
-              amount_input: parseFloat(amount),
-            })
-          }
-
-          // Send confirmation email
-          await supabase.functions.invoke('send-email', {
-            body: { type: 'donation_confirm', userId: user_id, charityId: charity_id, amount: parseFloat(amount) },
-          })
+        const userId = session.client_reference_id || meta.user_id // 🛡️ Dual-Lookup
+        if (!userId) {
+          console.error('No user_id in session metadata or client_reference_id')
           break
         }
-
-        // Subscription checkout
-        const userId = meta.user_id
-        if (!userId) break
 
         const plan = meta.plan as 'monthly' | 'yearly'
         const charityId = meta.charity_id || null
@@ -70,7 +44,19 @@ serve(async (req) => {
         const end = new Date(now)
         end.setDate(end.getDate() + (plan === 'yearly' ? 365 : 30))
 
-        await supabase.from('profiles').update({
+        // 🛡️ IDEMPOTENCY CHECK: Ensure we haven't already processed this session
+        const { data: existingPayment } = await supabase
+          .from('subscription_payments')
+          .select('id')
+          .eq('stripe_invoice_id', session.invoice as string)
+          .maybeSingle()
+        
+        if (existingPayment) {
+          console.log('⚠️ Webhook already processed for this invoice. Skipping.')
+          break
+        }
+
+        const { error: profileError } = await supabase.from('profiles').update({
           subscription_status: 'active',
           subscription_plan: plan,
           subscription_start: now.toISOString(),
@@ -78,41 +64,49 @@ serve(async (req) => {
           charity_id: charityId,
           charity_contribution_pct: charityPct,
           stripe_subscription_id: session.subscription as string,
+          stripe_customer_id: session.customer as string,
         }).eq('id', userId)
 
-        // Record payment
-        await supabase.from('subscription_payments').insert({
-          user_id: userId,
-          stripe_invoice_id: session.invoice as string ?? null,
-          amount,
-          plan,
-          status: 'paid',
-        })
+        if (profileError) console.error('Error updating profile:', profileError)
 
-        // Record charity donation
-        if (charityId) {
-          const donationAmount = Math.round(amount * (charityPct / 100))
-          await supabase.from('donations').insert({
+        // 2. SECONDARY TASKS: Wrap in try/catch so they don't break the webhook
+        try {
+          // Record payment record
+          await supabase.from('subscription_payments').insert({
             user_id: userId,
-            charity_id: charityId,
-            amount: donationAmount,
-            type: 'subscription',
-            status: 'completed',
+            stripe_invoice_id: session.invoice as string ?? null,
+            amount,
+            plan,
+            status: 'paid',
           })
-          await supabase.rpc('increment_charity_raised', {
-            charity_id_input: charityId,
-            amount_input: donationAmount,
-          })
-        }
 
-        // Send welcome email
-        await supabase.functions.invoke('send-email', {
-          body: { type: 'welcome', userId, plan, charityId },
-        })
+          // Record charity donation + Increment raised
+          if (charityId) {
+            const donationAmount = Math.round(amount * (charityPct / 100))
+            await supabase.from('donations').insert({
+              user_id: userId,
+              charity_id: charityId,
+              amount: donationAmount,
+              type: 'subscription',
+              status: 'completed',
+            })
+            await supabase.rpc('increment_charity_raised', {
+              charity_id_input: charityId,
+              amount_input: donationAmount,
+            })
+          }
+
+          // Trigger email (silent fail)
+          await supabase.functions.invoke('send-email', {
+            body: { type: 'welcome', userId, plan, charityId },
+          }).catch(e => console.error('Email failed but user is active:', e))
+          
+        } catch (secondaryError) {
+          console.error('Secondary webhook tasks failed:', secondaryError)
+        }
         break
       }
 
-      // ── Invoice paid → renew subscription ──
       case 'invoice.paid': {
         const invoice = event.data.object as Stripe.Invoice
         const sub = invoice.subscription
@@ -123,8 +117,6 @@ serve(async (req) => {
         if (!userId) break
 
         const plan = subscription.metadata?.plan as 'monthly' | 'yearly' ?? 'monthly'
-        const amount = invoice.amount_paid / 100 // Stripe uses paise
-
         const now = new Date()
         const end = new Date(now)
         end.setDate(end.getDate() + (plan === 'yearly' ? 365 : 30))
@@ -133,41 +125,6 @@ serve(async (req) => {
           subscription_status: 'active',
           subscription_end: end.toISOString(),
         }).eq('id', userId)
-
-        await supabase.from('subscription_payments').insert({
-          user_id: userId,
-          stripe_invoice_id: invoice.id,
-          amount,
-          plan,
-          status: 'paid',
-        })
-        break
-      }
-
-      // ── Subscription cancelled or lapsed ──
-      case 'customer.subscription.deleted': {
-        const subscription = event.data.object as Stripe.Subscription
-        const userId = subscription.metadata?.user_id
-        if (!userId) break
-
-        await supabase.from('profiles').update({
-          subscription_status: 'cancelled',
-        }).eq('id', userId)
-        break
-      }
-
-      // ── Subscription updated (e.g. plan change) ──
-      case 'customer.subscription.updated': {
-        const subscription = event.data.object as Stripe.Subscription
-        const userId = subscription.metadata?.user_id
-        if (!userId) break
-
-        const status = subscription.status === 'active' ? 'active'
-          : subscription.status === 'past_due' ? 'lapsed'
-          : subscription.status === 'canceled' ? 'cancelled'
-          : 'inactive'
-
-        await supabase.from('profiles').update({ subscription_status: status }).eq('id', userId)
         break
       }
     }

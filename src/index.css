@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Outfit:wght@500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -21,6 +23,11 @@
     -moz-osx-font-smoothing: grayscale;
     overflow-x: hidden;
     letter-spacing: -0.01em;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Outfit', sans-serif !important;
+    letter-spacing: -0.02em;
   }
 
   ::-webkit-scrollbar {
@@ -414,4 +421,50 @@ body::before {
 }
 .data-table tr:hover td {
   background: rgba(255,255,255,0.02);
+}
+
+/* 📱 Responsive Enhancements */
+@media (max-width: 768px) {
+  .section-container {
+    padding: 0 16px;
+  }
+  
+  .display-font {
+    font-size: 3rem !important;
+    line-height: 1.1;
+  }
+  
+  .glass-card {
+    padding: 1.25rem !important;
+  }
+  
+  /* Prevent tables from breaking mobile layout */
+  .overflow-x-auto {
+    -webkit-overflow-scrolling: touch;
+  }
+  
+  .data-table {
+    min-width: 600px;
+  }
+  
+  .page-wrapper {
+    padding-top: 70px;
+  }
+}
+
+@media (max-width: 480px) {
+  .display-font {
+    font-size: 2.25rem !important;
+  }
+  
+  .draw-ball {
+    width: 44px;
+    height: 44px;
+    font-size: 16px;
+  }
+  
+  .premium-btn, .outline-btn, .gold-btn {
+    padding: 10px 20px;
+    font-size: 14px;
+  }
 }
