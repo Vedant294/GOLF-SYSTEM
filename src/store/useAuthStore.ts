@@ -21,7 +21,7 @@ export const useAuthStore = create<{
   justPaid: boolean
   signOut: () => void
   refreshUser: (silent?: boolean) => Promise<Profile | null>
-  setSubscriptionActive: (plan?: string) => void
+  setSubscriptionActive: (plan?: 'monthly' | 'yearly') => void
 }>((set, get) => ({
   user: null,
   loading: true,
@@ -37,17 +37,17 @@ export const useAuthStore = create<{
     set({ user: null, initialized: true, loading: false, justPaid: get().justPaid })
   },
 
-  refreshUser: async (silent = false) => {
+  refreshUser: async (silent = false): Promise<Profile | null> => {
     try {
       if (!silent) set({ loading: true })
 
       const token = getStoredToken()
-      if (!token) { set({ user: null, initialized: true, loading: false }); return }
+      if (!token) { set({ user: null, initialized: true, loading: false }); return null }
 
       const userRes = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
         headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${token}` },
       })
-      if (!userRes.ok) { set({ user: null, initialized: true, loading: false }); return }
+      if (!userRes.ok) { set({ user: null, initialized: true, loading: false }); return null }
       const authUser = await userRes.json()
 
       const { supabase } = await import('../lib/supabase')
@@ -103,7 +103,7 @@ export const useAuthStore = create<{
     })
   },
 
-  setSubscriptionActive: (plan: 'monthly' | 'yearly' = 'monthly') => {
+  setSubscriptionActive: (plan: 'monthly' | 'yearly' = 'monthly'): void => {
     const expiry = Date.now() + 120000 
     localStorage.setItem('just_paid_expiry', expiry.toString())
     

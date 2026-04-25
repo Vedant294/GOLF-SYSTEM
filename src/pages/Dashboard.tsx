@@ -57,12 +57,12 @@ export default function Dashboard() {
       .catch(() => setLoadingScores(false))
 
     // Fetch Latest Draw & Entry
-    supabase.from('draws').select('id, month, year, status, drawn_numbers').order('created_at', { ascending: false }).limit(1).single()
+    supabase.from('draws').select('*').order('created_at', { ascending: false }).limit(1).single()
       .then(async res => {
         if (res.data) {
-          setLatestDraw(res.data)
-          const entry = await supabase.from('draw_entries').select('id, match_count, prize_amount').eq('draw_id', res.data.id).eq('user_id', user.id).maybeSingle()
-          setMyEntry(entry.data)
+          setLatestDraw(res.data as Draw)
+          const { data: entryData } = await supabase.from('draw_entries').select('*').eq('draw_id', res.data.id).eq('user_id', user.id).maybeSingle()
+          setMyEntry((entryData as any) || null)
         }
         setLoadingDraw(false)
       })
