@@ -11,6 +11,7 @@ export default function PaymentSuccess() {
   const navigate = useNavigate()
   const sessionId = searchParams.get('session_id')
   const [loading, setLoading] = useState(true)
+  const [scoreCount, setScoreCount] = useState(0)
   const setSubscriptionActive = useAuthStore((s) => s.setSubscriptionActive)
 
   useEffect(() => {
@@ -21,7 +22,6 @@ export default function PaymentSuccess() {
       }
 
       try {
-        // 🛡️ FRONTEND POWER-MOVE: Bypass the Edge Function and fix it directly
         const { data: { user } } = await supabase.auth.getUser()
         if (!user) throw new Error('Not authenticated')
 
@@ -41,7 +41,15 @@ export default function PaymentSuccess() {
           stripe_invoice_id: `success_${sessionId.slice(-8)}`
         })
 
-        // 3. Update the local store so the Dashboard sees it instantly
+        // 3. Fetch current score count
+        const { count } = await supabase
+          .from('scores')
+          .select('*', { count: 'exact', head: true })
+          .eq('user_id', user.id)
+        
+        setScoreCount(count || 0)
+
+        // 4. Update the local store
         setSubscriptionActive(plan as 'monthly' | 'yearly')
 
         toast.success('Subscription Activated!')
@@ -83,8 +91,8 @@ export default function PaymentSuccess() {
                   <p className="text-[#6EE7B7] font-800 uppercase">Active</p>
                 </div>
                 <div className="p-4 bg-white/5 rounded-2xl border border-white/5">
-                  <p className="text-[10px] text-[#64748B] uppercase font-800 tracking-widest mb-1">Entries</p>
-                  <p className="text-white font-800">5 Added</p>
+                  <p className="text-[10px] text-[#64748B] uppercase font-800 tracking-widest mb-1">Draw Entries</p>
+                  <p className="text-white font-800">{scoreCount} / 5</p>
                 </div>
               </div>
 
